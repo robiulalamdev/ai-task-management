@@ -12,6 +12,7 @@ const createSingleTask = async (data) => {
       const result = await newTask.save();
       return {
         success: true,
+        refetch: true,
         message: "Task created successfully",
         data: result,
       };
@@ -21,6 +22,7 @@ const createSingleTask = async (data) => {
   } catch (error) {
     return {
       success: false,
+      refetch: false,
       message: "Task created unsuccessfully",
       data: null,
       error: error.message,
@@ -33,12 +35,14 @@ const getAllTasks = async () => {
     const result = await Task.find({});
     return {
       success: true,
+      refetch: false,
       message: "Task retrieved successfully",
       data: result,
     };
   } catch (error) {
     return {
       success: false,
+      refetch: false,
       message: "Task retrieved unsuccessfully",
       data: null,
       error: error.message,
@@ -48,19 +52,19 @@ const getAllTasks = async () => {
 
 const getTasksByAggregatePipeline = async (data) => {
   try {
-    console.log(data);
     const pipeline = data?.pipeline || [];
     if (Array.isArray(pipeline)) {
       const result = await Task.aggregate(pipeline);
-      console.log(result);
       return {
         success: true,
+        refetch: false,
         message: "Task retrieved successfully",
         data: result,
       };
     } else {
       return {
         success: false,
+        refetch: false,
         message: "Task retrieved unsuccessfully",
         data: null,
         error: "Query not valid",

@@ -107,106 +107,118 @@ const functionRegistry = {
   getTasksByAggregatePipeline: getTasksByAggregatePipeline,
 };
 
-const generateAIAssistantMessage = async (messages = [], prompt = "") => {
-  try {
-    const aiResponse = await openai.chat.completions.create({
-      model: "gpt-4-turbo",
-      messages: [
-        {
-          role: "system",
-          content: SYSTEM_PROMPT,
+const tools = [
+  {
+    type: "function",
+    function: {
+      name: "createSingleTask",
+      description:
+        "Create a new single task with a name, date, start date, and end date.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          date: { type: "string", format: "date-time" },
+          start_date: { type: "string", format: "date-time" },
+          end_date: { type: "string", format: "date-time" },
         },
-        ...messages,
-        { role: "user", content: prompt },
-      ],
+        required: ["name", "start_date", "end_date"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "getAllTasks",
+      description: "Get all tasks list",
+      parameters: {},
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "getTasksByAggregatePipeline",
+      description: "Retrieve tasks using a MongoDB aggregation pipeline",
+      parameters: {
+        type: "object",
+        properties: {
+          pipeline: {
+            type: "array",
+            items: { type: "object" },
+            description:
+              "MongoDB aggregation pipeline consisting of multiple stages",
+          },
+        },
+        required: ["pipeline"],
+      },
+    },
+  },
+];
 
-      functions: [
-        {
-          name: "createSingleTask",
-          description:
-            "Create a new single task with a name, date, start date, and end date.",
-          parameters: {
-            type: "object",
-            properties: {
-              name: { type: "string" },
-              date: { type: "string", format: "date-time" },
-              start_date: { type: "string", format: "date-time" },
-              end_date: { type: "string", format: "date-time" },
-            },
-            required: ["name", "start_date", "end_date"],
-          },
-        },
-        {
-          name: "getAllTasks",
-          description: "Get all tasks list",
-          parameters: {},
-        },
-        {
-          name: "getTasksByAggregatePipeline",
-          description: "Retrieve tasks using a MongoDB aggregation pipeline",
-          parameters: {
-            type: "object",
-            properties: {
-              pipeline: {
-                type: "array",
-                items: { type: "object" },
-                description:
-                  "MongoDB aggregation pipeline consisting of multiple stages",
-              },
-            },
-            required: ["pipeline"],
-          },
-        },
-      ],
-      function_call: "auto",
+const generateAIAssistantMessage = async (allMessages = [], prompt = "") => {
+  try {
+    const messages = [
+      {
+        role: "system",
+        content: SYSTEM_PROMPT,
+      },
+      ...allMessages,
+      { role: "user", content: prompt },
+    ];
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4-turbo",
+      messages: messages,
+      tools,
+      store: true,
     });
 
-    const aiMessage = aiResponse.choices[0].message;
-    console.log(aiMessage);
+    const tool_calls = completion.choices[0].message.tool_calls;
 
+    let result = null;
     let refetch = false;
 
-    if (aiMessage.function_call) {
-      const functionName = aiMessage.function_call.name;
-      const args = JSON.parse(aiMessage.function_call.arguments);
+    if (tool_calls?.length > 0) {
+      for (const toolCall of tool_calls) {
+        console.log(toolCall);
+        messages.push(completion.choices[0].message);
+        if (toolCall.type === "function") {
+          const name = toolCall.function.name;
+          const args = JSON.parse(toolCall.function.arguments);
 
-      if (functionRegistry[functionName]) {
-        const data = await functionRegistry[functionName](args);
-        refetch = true;
-        const secResponse = await openai.chat.completions.create({
-          model: "gpt-4-turbo",
-          messages: [
-            {
-              role: "system",
-              content: SYSTEM_PROMPT,
-            },
-            ...messages,
-            {
-              role: "user",
-              content: `was user prompt: ${prompt} after functin call => Function Result: ${JSON.stringify(
-                data
-              )}`,
-            },
-          ],
-        });
+          const functionResponse = await functionRegistry[name](args);
+          if (functionResponse?.refetch === true && !refetch) {
+            refetch = true;
+          }
+          const jsonResult = await JSON.stringify(functionResponse, null, 2);
 
-        return {
-          success: true,
-          message: "AI message generated successfully",
-          refetch: refetch,
-          data: {
-            role: "assistant",
-            content: secResponse.choices[0].message.content,
-          },
-        };
+          messages.push({
+            role: "tool",
+            tool_call_id: toolCall.id,
+            content: jsonResult,
+          });
+        }
       }
+
+      const completion2 = await openai.chat.completions.create({
+        model: "gpt-4-turbo",
+        messages,
+        tools,
+        store: true,
+      });
+
+      result = completion2.choices[0].message.content;
+    } else {
+      result = completion.choices[0].message.content;
     }
 
     return {
       success: true,
       message: "AI message generated successfully",
       refetch: refetch,
-      data: { role: "assistant", content: aiMessage.content },
+      data: {
+        role: "assistant",
+        content: result,
+      },
     };
   } catch (error) {
     return {
