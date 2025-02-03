@@ -1,7 +1,7 @@
 export interface ITask {
-  _id: number;
+  _id: string;
   name: string;
-  status?: "Pending" | "Accepted" | "Completed";
+  status: "Pending" | "In Progress" | "Completed";
   date: string;
   start_date: string;
   end_date: string;

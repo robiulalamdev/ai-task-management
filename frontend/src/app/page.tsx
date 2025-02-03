@@ -3,7 +3,7 @@
 import ReadmeViewer from "@/components/common/ReadmeViewer";
 import { BASE_URL } from "@/lib/config/appwrite";
 import { ITask } from "@/lib/types/task";
-import { Edit2, Send, Trash2 } from "lucide-react";
+import { Edit2, Send, Trash2, XIcon } from "lucide-react";
 import React, { useEffect, useState } from "react";
 
 type IMessage = {
@@ -15,6 +15,9 @@ const HomePage = () => {
   const [tasks, setTasks] = useState<ITask[]>([]);
 
   const [messages, setMessages] = useState<IMessage[]>([]);
+
+  const [prompt, setPrompt] = useState("");
+  const [openModal, setOpenModal] = useState(false);
 
   const refetch = async () => {
     fetch(`${BASE_URL}/tasks`)
@@ -30,16 +33,8 @@ const HomePage = () => {
     refetch();
   }, []);
 
-  const deleteTask = (id: number) => {
+  const deleteTask = (id: string) => {
     setTasks(tasks.filter((task) => task._id !== id));
-  };
-
-  const editTask = (id: number, newTitle: string) => {
-    setTasks(
-      tasks.map((task) =>
-        task._id === id ? { ...task, name: newTitle } : task
-      )
-    );
   };
 
   const handleSubmit = async (
@@ -47,18 +42,20 @@ const HomePage = () => {
   ): Promise<void> => {
     e.preventDefault();
     const form = e.target as HTMLFormElement;
-    const prompt = (form.elements.namedItem("prompt") as HTMLInputElement)
-      .value;
+    const formPromptValue = (
+      form.elements.namedItem("prompt") as HTMLInputElement
+    ).value;
 
-    if (prompt) {
+    if (formPromptValue) {
       // Add the user message first
       const newMessages: IMessage[] = [
         ...messages,
-        { role: "user", content: prompt },
+        { role: "user", content: formPromptValue },
       ];
       setMessages(newMessages); // Update the state
 
       form.reset();
+      setPrompt("");
 
       // Send the updated messages array in the request
       fetch(`${BASE_URL}/ask`, {
@@ -66,7 +63,10 @@ const HomePage = () => {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ prompt: prompt, messages: newMessages }), // Use updated messages
+        body: JSON.stringify({
+          prompt: formPromptValue,
+          messages: newMessages,
+        }), // Use updated messages
       })
         .then((res) => res.json())
         .then((data) => {
@@ -85,7 +85,44 @@ const HomePage = () => {
     }
   };
 
-  console.log(messages);
+  const handleInput = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const text = event.target.value;
+    const cursorPos = event.target.selectionStart || text.length; // Get cursor position
+    setPrompt(text);
+
+    // Check last three characters before cursor match "id:"
+    if (cursorPos >= 3 && text.slice(cursorPos - 3, cursorPos) === "id:") {
+      setOpenModal(true);
+    } else {
+      setOpenModal(false);
+    }
+  };
+
+  const handleSetId = (id: string) => {
+    if (!id) return;
+
+    setPrompt((prevInputValue) => {
+      const cursorPos = prevInputValue.length;
+
+      // Find the last occurrence of "id:" before the cursor
+      const idIndex = prevInputValue.lastIndexOf("id:", cursorPos - 1);
+
+      // Check if "id:" exists before the cursor position
+      if (idIndex !== -1) {
+        const beforeId = prevInputValue.slice(0, idIndex + 3); // Keep "id:"
+        const afterId = prevInputValue.slice(idIndex + 3).trimStart(); // Remove spaces after "id:"
+
+        // Construct the new text by replacing "id:" with "id:<username>"
+        const newText = beforeId + id + " " + afterId;
+        return newText;
+      }
+
+      // If no "id:" found, just append "id:<username>" at the end
+      return prevInputValue + ` id:${id} `;
+    });
+
+    setOpenModal(false);
+  };
 
   return (
     <div className="flex flex-col md:flex-row h-screen bg-gray-950 text-gray-100">
@@ -111,21 +148,19 @@ const HomePage = () => {
                   <td className="p-3">
                     <span
                       className={`px-2 py-1 rounded-full text-xs font-medium
-                  bg-green-500 text-green-900`}
+                      ${
+                        task.status === "Completed"
+                          ? "bg-green-500 text-green-900"
+                          : task.status === "In Progress"
+                          ? "bg-yellow-500 text-yellow-900"
+                          : "bg-red-500 text-red-900"
+                      }`}
                     >
-                      Completed
+                      {task.status}
                     </span>
                   </td>
                   <td className="p-3">
-                    <button
-                      onClick={() =>
-                        editTask(
-                          task._id,
-                          prompt("Edit task:", task.name) || task.name
-                        )
-                      }
-                      className="text-blue-400 hover:text-blue-300 mr-2"
-                    >
+                    <button className="text-blue-400 hover:text-blue-300 mr-2">
                       <Edit2 size={18} />
                     </button>
                     <button
@@ -174,10 +209,39 @@ const HomePage = () => {
         </div>
         <form
           onSubmit={handleSubmit}
-          className="flex items-center bg-gray-800 min-h-[50px] rounded-lg overflow-hidden"
+          className="flex items-center bg-gray-800 min-h-[50px] rounded-lg relative w-full"
         >
+          {openModal && (
+            <div>
+              <div className="absolute bottom-[48px] left-0 w-full max-w-[400px] min-h-[450px] max-h-[450px] overflow-y-auto bg-gray-800 rounded-t-lg shadow-md">
+                <div className="w-full h-full grid grid-cols-1 gap-2 relative">
+                  <div className="w-full h-full flex justify-center items-center">
+                    <button
+                      type="button"
+                      onClick={() => setOpenModal(false)}
+                      className="absolute top-0 right-0 p-2 bg-gray-900 text-gray-
+                    300 hover:bg-gray-800 rounded-lg"
+                    >
+                      <XIcon className="h-6 w-6" />
+                    </button>
+                  </div>
+                  {tasks.map((task: ITask, index) => (
+                    <div
+                      key={index}
+                      onClick={() => handleSetId(task._id)}
+                      className="hover:bg-slate-300 px-4 py-1 cursor-pointer hover:text-black"
+                    >
+                      <h1>{task.name}</h1>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
           <input
+            onChange={handleInput}
             type="text"
+            value={prompt}
             name="prompt"
             placeholder="Ask AI to generate a task..."
             className="flex-grow p-3 bg-transparent text-gray-100 focus:outline-none"
